@@ -17,7 +17,7 @@ public class TouchHandler : MonoBehaviour {
 				Vector3 blockPos = worldGenerator.WorldToBlockPosition (p);
 
 				Chunk chunk = worldGenerator.GetChunk (p);
-				chunk.SetBlock (blockPos, 0);
+				chunk.SetBlock (blockPos, BlockType.Air);
 			}
 		}
 
@@ -33,7 +33,7 @@ public class TouchHandler : MonoBehaviour {
 				worldGenerator.AddChunk (chunkPos, true);
 
 				Chunk chunk = worldGenerator.GetChunk (p);
-				chunk.SetBlock (blockPos, 1);
+				chunk.SetBlock (blockPos, BlockType.Dirt);
 			}
 		}
 	}
