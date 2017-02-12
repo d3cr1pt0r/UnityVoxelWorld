@@ -5,10 +5,11 @@ using UnityEngine;
 public class WorldGenerator : MonoBehaviour {
 
 	[SerializeField] private Chunk chunk = null;
+	[SerializeField] private Transform playerTransform = null;
 	[SerializeField] private int chunkViewDistance = 5;
 	[SerializeField] private int chunkSize = 16;
 	[SerializeField] private float blockSize = 1.0f;
-	[SerializeField] private int seed = 0;
+//	[SerializeField] private int seed = 0;
 
 	private Dictionary<Vector3, Chunk> world;
 	private Chunk tmpChunk;
@@ -16,8 +17,6 @@ public class WorldGenerator : MonoBehaviour {
 	private void Awake() {
 		world = new Dictionary<Vector3, Chunk> ();
 		tmpChunk = null;
-
-//		CheckForNewChunks ();
 	}
 
 	private void Update() {
@@ -25,8 +24,7 @@ public class WorldGenerator : MonoBehaviour {
 	}
 
 	private void CheckForNewChunks() {
-		Vector3 playerPosition = Camera.main.transform.position;
-		Vector3 chunkPos = WorldToChunkPosition (playerPosition);
+		Vector3 chunkPos = WorldToChunkPosition (playerTransform.position);
 
 		for (int z = -chunkViewDistance; z <= chunkViewDistance; z++) {
 			for (int y = -chunkViewDistance; y <= chunkViewDistance; y++) {
@@ -39,73 +37,55 @@ public class WorldGenerator : MonoBehaviour {
 					viewerChunkY = 0;
 
 					Vector3 viewerChunkPos = new Vector3 (viewerChunkX, viewerChunkY, viewerChunkZ);
-
-					if (!world.TryGetValue (viewerChunkPos, out tmpChunk)) {
-						Chunk chunk = CreateChunk (viewerChunkX, viewerChunkY, viewerChunkZ);
-						world.Add (viewerChunkPos, chunk);
-					}
+					AddChunk (viewerChunkPos);
 				}
 			}
 		}
 	}
 
-	private Chunk CreateChunk(int x, int y, int z) {
-		Vector3 worldPosition = new Vector3 (x * blockSize * chunkSize, y * blockSize * chunkSize, z * blockSize * chunkSize);
+	private Chunk CreateChunk(Vector3 position, bool empty=false) {
+		Vector3 worldPosition = position * blockSize * chunkSize;
 
 		Chunk chunkInstance = Instantiate (chunk, worldPosition, Quaternion.identity);
-		chunkInstance.CreateChunk (GenerateSimplexNoiseChunk (worldPosition), blockSize);
+		chunkInstance.GenerateChunk (worldPosition, chunkSize, blockSize, empty);
 		chunkInstance.transform.SetParent (transform);
 
 		return chunkInstance;
 	}
 
-	private byte[,,] GenerateSimplexNoiseChunk(Vector3 position) {
-		byte[,,] chunk = new byte[chunkSize, chunkSize, chunkSize];
-
-		for (int z = 0; z < chunkSize; z++) {
-			float noiseZ = (float)(position.z + z * blockSize) / 50.0f;
-			for (int y = 0; y < chunkSize; y++) {
-				float noiseY = (float)(position.y + y * blockSize) / 50.0f;
-				for (int x = 0; x < chunkSize; x++) {
-					float noiseX = (float)(position.x + x * blockSize) / 50.0f;
-					float noiseValue = SimplexNoise.Noise.Generate (noiseX, noiseY, noiseZ);
-					noiseValue += (10.0f - (float)y) / 10.0f;
-					chunk [x, y, z] = noiseValue > 0.2f ? (byte)1 : (byte)0;
-					if (y <= 2) {
-						chunk [x, y, z] = 1;
-					}
-				}
-			}
-		}
-
-		return chunk;
-	}
-
-	public float GetBlockSize() {
-		return blockSize;
-	}
-
+	// gets world position transformed into 1 unit sized 
 	public Vector3 WorldToChunkPosition(Vector3 worldPosition) {
-		float preMultiply = chunkSize * blockSize;
+		float chunkSizeTimesBlockSize = chunkSize * blockSize;
 
-		int x = Mathf.RoundToInt ((worldPosition.x + blockSize * 0.5f) / preMultiply);
-		int y = Mathf.RoundToInt ((worldPosition.y + blockSize * 0.5f) / preMultiply);
-		int z = Mathf.RoundToInt ((worldPosition.z + blockSize * 0.5f) / preMultiply);
+		int x = Mathf.RoundToInt ((worldPosition.x + blockSize * 0.5f) / chunkSizeTimesBlockSize);
+		int y = Mathf.RoundToInt ((worldPosition.y + blockSize * 0.5f) / chunkSizeTimesBlockSize);
+		int z = Mathf.RoundToInt ((worldPosition.z + blockSize * 0.5f) / chunkSizeTimesBlockSize);
 
 		return new Vector3 (x, y, z);
 	}
 
+	// transforms world position to a position used in local chunk space (RANGE: x=0-chunkSize y=0-chunkSize, z=0-chunkSize)
+	// this position is used to get the block from the chunk using the chunks local coordinate space
 	public Vector3 WorldToBlockPosition(Vector3 worldPosition) {
 		Vector3 chunkPosition = WorldToChunkPosition (worldPosition);
 
 		float preCalc1 = blockSize * 0.5f + (chunkSize * 0.5f) * blockSize;
-		float preCalc2 = chunkSize * blockSize;
+		float chunkSizeTimesBlockSize = chunkSize * blockSize;
 
-		int x = (int) (((worldPosition.x + preCalc1) - chunkPosition.x * preCalc2) / blockSize);
-		int y = (int) (((worldPosition.y + preCalc1) - chunkPosition.y * preCalc2) / blockSize);
-		int z = (int) (((worldPosition.z + preCalc1) - chunkPosition.z * preCalc2) / blockSize);
+		int x = (int) (((worldPosition.x + preCalc1) - chunkPosition.x * chunkSizeTimesBlockSize) / blockSize);
+		int y = (int) (((worldPosition.y + preCalc1) - chunkPosition.y * chunkSizeTimesBlockSize) / blockSize);
+		int z = (int) (((worldPosition.z + preCalc1) - chunkPosition.z * chunkSizeTimesBlockSize) / blockSize);
 
 		return new Vector3 (x, y, z);
+	}
+
+	public void AddChunk(Vector3 position, bool empty=false) {
+		if (!world.TryGetValue (position, out tmpChunk)) {
+			Chunk c = CreateChunk (position, empty);
+			world.Add (position, c);
+
+			Debug.Log (string.Format ("AddChunk() Pos: {0} Empty: {1}", position, empty));
+		}
 	}
 
 	public Chunk GetChunk(Vector3 worldPosition) {

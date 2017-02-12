@@ -24,14 +24,31 @@ public class Chunk : MonoBehaviour {
 		triangles = new List<int> ();
 	}
 
-	public void CreateChunk(byte[,,] chunk, float blockSize) {
-		Init ();
+	private void Init() {
+		meshCollider.sharedMesh = null;
+		mesh.Clear (false);
+		vertices.Clear ();
+		uvs.Clear ();
+		triangles.Clear ();
+	}
 
-		this.chunkSize = chunk.GetLength (0);
-		this.chunkHalfSize = this.chunkSize / 2;
+	public void GenerateChunk(Vector3 position, int chunkSize, float blockSize, bool empty=false) {
+		this.chunkSize = chunkSize;
+		this.chunkHalfSize = chunkSize / 2;
 		this.blockSize = blockSize;
 		this.blockHalfSize = blockSize * 0.5f;
-		this.chunk = chunk;
+
+		if (!empty) {
+			GenerateNoiseChunk (position, chunkSize);
+		} else {
+			GenerateEmptyChunk (chunkSize);
+		}
+
+		GenerateChunkMesh ();
+	}
+
+	private void GenerateChunkMesh() {
+		Init ();
 
 		for (int z = 0; z < chunkSize; z++) {
 			for (int y = 0; y < chunkSize; y++) {
@@ -46,35 +63,63 @@ public class Chunk : MonoBehaviour {
 		CreateMesh ();
 	}
 
-	public void RemoveBlock(int x, int y, int z) {
-		if (IsInBounds(x, y, z)) {
-			chunk [x, y, z] = 0;
+	public void SetBlock(int x, int y, int z, byte type) {
+		if (IsInBounds (x, y, z)) {
+			chunk [x, y, z] = type;
+			GenerateChunkMesh ();
+
+			Debug.Log (string.Format ("SetBlock() X: {0} Y: {1} Z: {2} Type: {3}", x, y, z, type));
+		} else {
+			Debug.Log (string.Format ("SetBlock() out of bounds X: {0} Y: {1} Z: {2}", x, y, z));
 		}
-
-		CreateChunk (chunk, blockSize);
-
-		Debug.Log (string.Format ("Removed block at X: {0} Y: {1} Z:{2}", x, y, z));
 	}
 
-	public void RemoveBlock(Vector3 position) {
-		RemoveBlock ((int)position.x, (int)position.y, (int)position.z);
+	public void SetBlock(Vector3 position, byte type) {
+		SetBlock ((int)position.x, (int)position.y, (int)position.z, type);
 	}
 
-	public float GetSize() {
-		return chunkSize * blockSize;
+	private void GenerateEmptyChunk(int chunkSize) {
+		chunk = new byte[chunkSize, chunkSize, chunkSize];
+
+		for (int z = 0; z < chunkSize; z++) {
+			for (int y = 0; y < chunkSize; y++) {
+				for (int x = 0; x < chunkSize; x++) {
+					chunk [x, y, z] = 0;
+				}
+			}
+		}
 	}
 
-	private void Init() {
-		vertices.Clear ();
-		uvs.Clear ();
-		triangles.Clear ();
+	private void GenerateNoiseChunk(Vector3 position, int chunkSize) {
+		chunk = new byte[chunkSize, chunkSize, chunkSize];
+
+		for (int z = 0; z < chunkSize; z++) {
+			float noiseZ = (float)(position.z + z * blockSize) / 50.0f;
+
+			for (int y = 0; y < chunkSize; y++) {
+				float noiseY = (float)(position.y + y * blockSize) / 50.0f;
+
+				for (int x = 0; x < chunkSize; x++) {
+					float noiseX = (float)(position.x + x * blockSize) / 50.0f;
+					float noiseValue = SimplexNoise.Noise.Generate (noiseX, noiseY, noiseZ);
+
+					noiseValue += (10.0f - (float)y) / 10.0f;
+					chunk [x, y, z] = noiseValue > 0.2f ? (byte)1 : (byte)0;
+
+					if (y < 1) {
+						chunk [x, y, z] = 1;
+					}
+				}
+			}
+		}
 	}
 
 	private bool IsInBounds(int x, int y, int z) {
 		return x >= 0 && x < chunkSize && y >= 0 && y < chunkSize && z >= 0 && z < chunkSize;
 	}
 
-	private Vector3 GetWorldPosition(int x, int y, int z) {
+	// gets chunk position transformed from 0-chunkSize range to -halfChunkSize - halfChunkSize
+	private Vector3 GetChunkSpacePosition(int x, int y, int z) {
 		int px = (int)(x * blockSize - chunkHalfSize * blockSize);
 		int py = (int)(y * blockSize - chunkHalfSize * blockSize);
 		int pz = (int)(z * blockSize - chunkHalfSize * blockSize);
@@ -82,11 +127,11 @@ public class Chunk : MonoBehaviour {
 		return new Vector3 (px, py, pz);
 	}
 
-	private Vector3 GetWorldPosition(Vector3 position) {
-		return GetWorldPosition ((int)position.x, (int)position.y, (int)position.z);
+	private Vector3 GetChunkSpacePosition(Vector3 position) {
+		return GetChunkSpacePosition ((int)position.x, (int)position.y, (int)position.z);
 	}
 
-	private BlockNeighbourInfo GetNeighbourBlockInfo(int x, int y, int z) {
+	private BlockNeighbourInfo GetBlockNeighbourInfo(int x, int y, int z) {
 		BlockNeighbourInfo blockNeighbourInfo = new BlockNeighbourInfo ();
 
 		blockNeighbourInfo.Front = IsInBounds (x, y, z - 1) && chunk [x, y, z - 1] > 0;
@@ -113,87 +158,83 @@ public class Chunk : MonoBehaviour {
 	}
 
 	private void CreateBlock(int x, int y, int z) {
-		BlockNeighbourInfo blockNeighbourInfo = GetNeighbourBlockInfo (x, y, z);
-		Vector3 worldPosition = GetWorldPosition (x, y, z);
-
-		int px = (int) worldPosition.x;
-		int py = (int) worldPosition.y;
-		int pz = (int) worldPosition.z;
+		BlockNeighbourInfo blockNeighbourInfo = GetBlockNeighbourInfo (x, y, z);
+		Vector3 worldPosition = GetChunkSpacePosition (x, y, z);
 
 		if (!blockNeighbourInfo.Front)
-			CreateFrontFace (px, py, pz);
+			CreateFrontFace (worldPosition);
 
 		if (!blockNeighbourInfo.Back)
-			CreateBackFace (px, py, pz);
+			CreateBackFace (worldPosition);
 
 		if (!blockNeighbourInfo.Left)
-			CreateLeftFace (px, py, pz);
+			CreateLeftFace (worldPosition);
 
 		if (!blockNeighbourInfo.Right)
-			CreateRightFace (px, py, pz);
+			CreateRightFace (worldPosition);
 
 		if (!blockNeighbourInfo.Top)
-			CreateTopFace (px, py, pz);
+			CreateTopFace (worldPosition);
 
 		if (!blockNeighbourInfo.Bottom)
-			CreateBottomFace (px, py, pz);
+			CreateBottomFace (worldPosition);
 	}
 
-	private void CreateLeftFace(int x, int y, int z) {
-		vertices.Add (new Vector3 (x-blockHalfSize, y+blockHalfSize, z+blockHalfSize));
-		vertices.Add (new Vector3 (x-blockHalfSize, y+blockHalfSize, z-blockHalfSize));
-		vertices.Add (new Vector3 (x-blockHalfSize, y-blockHalfSize, z-blockHalfSize));
-		vertices.Add (new Vector3 (x-blockHalfSize, y-blockHalfSize, z+blockHalfSize));
+	private void CreateLeftFace(Vector3 position) {
+		vertices.Add (new Vector3 (position.x-blockHalfSize, position.y+blockHalfSize, position.z+blockHalfSize));
+		vertices.Add (new Vector3 (position.x-blockHalfSize, position.y+blockHalfSize, position.z-blockHalfSize));
+		vertices.Add (new Vector3 (position.x-blockHalfSize, position.y-blockHalfSize, position.z-blockHalfSize));
+		vertices.Add (new Vector3 (position.x-blockHalfSize, position.y-blockHalfSize, position.z+blockHalfSize));
 
 		CreateUvs ();
 		CreateTriangles ();
 	}
 
-	private void CreateRightFace(int x, int y, int z) {
-		vertices.Add (new Vector3 (x+blockHalfSize, y+blockHalfSize, z-blockHalfSize));
-		vertices.Add (new Vector3 (x+blockHalfSize, y+blockHalfSize, z+blockHalfSize));
-		vertices.Add (new Vector3 (x+blockHalfSize, y-blockHalfSize, z+blockHalfSize));
-		vertices.Add (new Vector3 (x+blockHalfSize, y-blockHalfSize, z-blockHalfSize));
+	private void CreateRightFace(Vector3 position) {
+		vertices.Add (new Vector3 (position.x+blockHalfSize, position.y+blockHalfSize, position.z-blockHalfSize));
+		vertices.Add (new Vector3 (position.x+blockHalfSize, position.y+blockHalfSize, position.z+blockHalfSize));
+		vertices.Add (new Vector3 (position.x+blockHalfSize, position.y-blockHalfSize, position.z+blockHalfSize));
+		vertices.Add (new Vector3 (position.x+blockHalfSize, position.y-blockHalfSize, position.z-blockHalfSize));
 
 		CreateUvs ();
 		CreateTriangles ();
 	}
 
-	private void CreateTopFace(int x, int y, int z) {
-		vertices.Add (new Vector3 (x-blockHalfSize, y+blockHalfSize, z+blockHalfSize));
-		vertices.Add (new Vector3 (x+blockHalfSize, y+blockHalfSize, z+blockHalfSize));
-		vertices.Add (new Vector3 (x+blockHalfSize, y+blockHalfSize, z-blockHalfSize));
-		vertices.Add (new Vector3 (x-blockHalfSize, y+blockHalfSize, z-blockHalfSize));
+	private void CreateTopFace(Vector3 position) {
+		vertices.Add (new Vector3 (position.x-blockHalfSize, position.y+blockHalfSize, position.z+blockHalfSize));
+		vertices.Add (new Vector3 (position.x+blockHalfSize, position.y+blockHalfSize, position.z+blockHalfSize));
+		vertices.Add (new Vector3 (position.x+blockHalfSize, position.y+blockHalfSize, position.z-blockHalfSize));
+		vertices.Add (new Vector3 (position.x-blockHalfSize, position.y+blockHalfSize, position.z-blockHalfSize));
 
 		CreateUvs ();
 		CreateTriangles ();
 	}
 
-	private void CreateBottomFace(int x, int y, int z) {
-		vertices.Add (new Vector3 (x-blockHalfSize, y-blockHalfSize, z-blockHalfSize));
-		vertices.Add (new Vector3 (x+blockHalfSize, y-blockHalfSize, z-blockHalfSize));
-		vertices.Add (new Vector3 (x+blockHalfSize, y-blockHalfSize, z+blockHalfSize));
-		vertices.Add (new Vector3 (x-blockHalfSize, y-blockHalfSize, z+blockHalfSize));
+	private void CreateBottomFace(Vector3 position) {
+		vertices.Add (new Vector3 (position.x-blockHalfSize, position.y-blockHalfSize, position.z-blockHalfSize));
+		vertices.Add (new Vector3 (position.x+blockHalfSize, position.y-blockHalfSize, position.z-blockHalfSize));
+		vertices.Add (new Vector3 (position.x+blockHalfSize, position.y-blockHalfSize, position.z+blockHalfSize));
+		vertices.Add (new Vector3 (position.x-blockHalfSize, position.y-blockHalfSize, position.z+blockHalfSize));
 
 		CreateUvs ();
 		CreateTriangles ();
 	}
 
-	private void CreateFrontFace(int x, int y, int z) {
-		vertices.Add (new Vector3 (x-blockHalfSize, y+blockHalfSize, z-blockHalfSize));
-		vertices.Add (new Vector3 (x+blockHalfSize, y+blockHalfSize, z-blockHalfSize));
-		vertices.Add (new Vector3 (x+blockHalfSize, y-blockHalfSize, z-blockHalfSize));
-		vertices.Add (new Vector3 (x-blockHalfSize, y-blockHalfSize, z-blockHalfSize));
+	private void CreateFrontFace(Vector3 position) {
+		vertices.Add (new Vector3 (position.x-blockHalfSize, position.y+blockHalfSize, position.z-blockHalfSize));
+		vertices.Add (new Vector3 (position.x+blockHalfSize, position.y+blockHalfSize, position.z-blockHalfSize));
+		vertices.Add (new Vector3 (position.x+blockHalfSize, position.y-blockHalfSize, position.z-blockHalfSize));
+		vertices.Add (new Vector3 (position.x-blockHalfSize, position.y-blockHalfSize, position.z-blockHalfSize));
 
 		CreateUvs ();
 		CreateTriangles ();
 	}
 
-	private void CreateBackFace(int x, int y, int z) {
-		vertices.Add (new Vector3 (x+blockHalfSize, y+blockHalfSize, z+blockHalfSize));
-		vertices.Add (new Vector3 (x-blockHalfSize, y+blockHalfSize, z+blockHalfSize));
-		vertices.Add (new Vector3 (x-blockHalfSize, y-blockHalfSize, z+blockHalfSize));
-		vertices.Add (new Vector3 (x+blockHalfSize, y-blockHalfSize, z+blockHalfSize));
+	private void CreateBackFace(Vector3 position) {
+		vertices.Add (new Vector3 (position.x+blockHalfSize, position.y+blockHalfSize, position.z+blockHalfSize));
+		vertices.Add (new Vector3 (position.x-blockHalfSize, position.y+blockHalfSize, position.z+blockHalfSize));
+		vertices.Add (new Vector3 (position.x-blockHalfSize, position.y-blockHalfSize, position.z+blockHalfSize));
+		vertices.Add (new Vector3 (position.x+blockHalfSize, position.y-blockHalfSize, position.z+blockHalfSize));
 
 		CreateUvs ();
 		CreateTriangles ();
